@@ -6,12 +6,9 @@ import torch
 import torchtext.data as data
 import torchtext.datasets as datasets
 import model
-import train
+# import train
 import mydatasets
-import random
-import re
-
-SEED = 1234
+import torch.autograd as autograd
 
 parser = argparse.ArgumentParser(description='CNN text classificer')
 # learning
@@ -26,7 +23,7 @@ parser.add_argument('-save-dir', type=str, default='snapshot', help='where to sa
 parser.add_argument('-early-stop', type=int, default=1000,
                     help='iteration numbers to stop without performance increasing')
 parser.add_argument('-save-best', type=bool, default=True, help='whether to save when get best performance')
-# data 
+# data
 parser.add_argument('-shuffle', action='store_true', default=False, help='shuffle the data every epoch')
 # model
 parser.add_argument('-dropout', type=float, default=0.5, help='the probability for dropout [default: 0.5]')
@@ -41,7 +38,7 @@ parser.add_argument('-device', type=int, default=-1, help='device to use for ite
 parser.add_argument('-no-cuda', action='store_true', default=False, help='disable the gpu')
 # option
 parser.add_argument('-snapshot', type=str, default=None, help='filename of model snapshot [default: None]')
-parser.add_argument('-predict', type=str, default=None, help='predict the sentence given')
+parser.add_argument('-predict', type=str, default=True, help='predict the sentence given')
 parser.add_argument('-test', action='store_true', default=False, help='train or test')
 args = parser.parse_args()
 
@@ -60,44 +57,6 @@ def sst(text_field, label_field, **kargs):
     return train_iter, dev_iter, test_iter
 
 
-def clean_str(string):
-    """
-    Tokenization/string cleaning for all datasets except for SST.
-    Original taken from https://github.com/yoonkim/CNN_sentence/blob/master/process_data.py
-    """
-    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)
-    string = re.sub(r"\'s", " \'s", string)
-    string = re.sub(r"\'ve", " \'ve", string)
-    string = re.sub(r"n\'t", " n\'t", string)
-    string = re.sub(r"\'re", " \'re", string)
-    string = re.sub(r"\'d", " \'d", string)
-    string = re.sub(r"\'ll", " \'ll", string)
-    string = re.sub(r",", " , ", string)
-    string = re.sub(r"!", " ! ", string)
-    string = re.sub(r"\(", " \( ", string)
-    string = re.sub(r"\)", " \) ", string)
-    string = re.sub(r"\?", " \? ", string)
-    string = re.sub(r"\s{2,}", " ", string)
-    return string.strip()
-
-
-# load IMDB dataset
-def imdb(text_field, label_field, **kargs):
-    text_field.preprocessing = data.Pipeline(clean_str)
-    train_data, test_data = datasets.IMDB.splits(text_field, label_field)
-    train_data, dev_data = train_data.split(random_state=random.seed(SEED))
-    text_field.build_vocab(train_data, dev_data, test_data)
-    label_field.build_vocab(train_data, dev_data, test_data)
-    train_iter, dev_iter, test_iter = data.BucketIterator.splits(
-        (train_data, dev_data, test_data),
-        batch_sizes=(args.batch_size,
-                     len(dev_data),
-                     len(test_data)),
-        **kargs)
-    return train_iter, dev_iter, test_iter
-    # return train_iter, dev_iter, test_iter
-
-
 # load MR dataset
 def mr(text_field, label_field, **kargs):
     train_data, dev_data = mydatasets.MR.splits(text_field, label_field)
@@ -114,8 +73,9 @@ def mr(text_field, label_field, **kargs):
 print("\nLoading data...")
 text_field = data.Field(lower=True)
 label_field = data.Field(sequential=False)
-# train_iter, dev_iter = mr(text_field, label_field, device=-1, repeat=False)
-train_iter, dev_iter, test_iter = imdb(text_field, label_field, device=-1, repeat=False)
+train_iter, dev_iter = mr(text_field, label_field, device=-1, repeat=False)
+# train_iter, dev_iter, test_iter = sst(text_field, label_field, device=-1, repeat=False)
+
 
 # update args and print
 args.embed_num = len(text_field.vocab)
@@ -124,34 +84,100 @@ args.cuda = (not args.no_cuda) and torch.cuda.is_available()
 del args.no_cuda
 args.kernel_sizes = [int(k) for k in args.kernel_sizes.split(',')]
 args.save_dir = os.path.join(args.save_dir, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
-
 print("\nParameters:")
 for attr, value in sorted(args.__dict__.items()):
     print("\t{}={}".format(attr.upper(), value))
 
 # model
 cnn = model.CNN_Text(args)
-if args.snapshot is not None:
-    print('\nLoading model from {}...'.format(args.snapshot))
-    cnn.load_state_dict(torch.load(args.snapshot))
+snapshot = '/Users/xuchen/core/pycharm/project/cnn-text-classification-pytorch/snapshot/best_steps_11513.pt'
+if snapshot is not None:
+    print('\nLoading model from {}...'.format(snapshot))
+    cnn.load_state_dict(torch.load(snapshot))
 
 if args.cuda:
     torch.cuda.set_device(args.device)
     cnn = cnn.cuda()
 
+
+def sent_acc(samples, model, text_field, cuda_flag, positive=True, ):
+    size = len(samples)
+    model.eval()
+    # text = text_field.tokenize(text)
+    outputs = torch.tensor([], dtype=torch.int64)
+    for sample in samples:
+        sample = text_field.preprocess(sample)
+        sample = [[text_field.vocab.stoi[x] for x in sample]]
+        # inputs.append(sample)
+        x = torch.tensor(sample)
+        x = autograd.Variable(x)
+        if cuda_flag:
+            x = x.cuda()
+        # print(x)
+        output = model(x)
+        _, predicted = torch.max(output, 1)  # logits
+        outputs = torch.cat([outputs, predicted])
+
+    target = [1] * size if positive else [0] * size
+    target = torch.tensor(target)
+    corrects = outputs == target
+    corrects = corrects.sum()
+    accuracy = 100.0 * corrects / size
+    # return label_feild.vocab.itos[predicted.data[0][0]+1]
+    return accuracy
+
+def calculate_acc(file_pos, file_neg, label):
+    # mean_acc, pos_acc, neg_acc = None, None, None
+    file_pos = '{}/{}'.format(file_pos, label)
+    with open(file_pos, 'r') as f:
+        samples = f.read().split('<|endoftext|>')
+        samples = [s for s in samples if len(s.split()) > 20]
+
+        # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
+        pos_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=True)
+        # print('{} = {}'.format(l, pos_acc))
+
+    file_neg = '{}/{}'.format(file_neg, label)
+    with open(file_neg, 'r') as f:
+        samples = f.read().split('<|endoftext|>')
+        samples = [s for s in samples if len(s.split()) > 20]
+
+        # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
+        neg_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=False)
+        # print('{} = {}'.format(l, neg_acc))
+    mean_acc = (pos_acc + neg_acc) / 2
+    return mean_acc, pos_acc, neg_acc
+
+
 # train or predict
-if args.predict is not None:
-    label = train.predict(args.predict, cnn, text_field, label_field, args.cuda)
-    print('\n[Text]  {}\n[Label] {}\n'.format(args.predict, label))
-elif args.test:
-    try:
-        train.eval(test_iter, cnn, args)
-    except Exception as e:
-        print("\nSorry. The test dataset doesn't  exist.\n")
-else:
-    print()
-    try:
-        train.train(train_iter, dev_iter, cnn, args)
-    except KeyboardInterrupt:
-        print('\n' + '-' * 89)
-        print('Exiting from training early')
+label = ['B', 'BR', 'BC', 'BCR']
+file_pos = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad_abs/positive'
+file_neg = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad_abs/negative'
+# file_pos = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/reversed/positive'
+# file_neg = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/reversed/negative'
+mean_acc, pos_acc, neg_acc = calculate_acc(file_pos, file_neg, 'BC')
+print(pos_acc)
+print(neg_acc)
+print(mean_acc.item())
+
+# for l in label:
+#     pos_acc, neg_acc = None, None
+#     with open('/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/positive/{}'.format(l), 'r') as f:
+#         samples = f.read().split('<|endoftext|>')
+#         samples = [s for s in samples if len(s.split()) > 20]
+#
+#         # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
+#         pos_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=True)
+#         # print('{} = {}'.format(l, pos_acc))
+#
+#     with open('/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/negative/{}'.format(l), 'r') as f:
+#         samples = f.read().split('<|endoftext|>')
+#         samples = [s for s in samples if len(s.split()) > 20]
+#
+#         # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
+#         neg_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=False)
+#         # print('{} = {}'.format(l, neg_acc))
+#
+#     print('{} = {}'.format(l, (pos_acc + neg_acc) / 2))
+
+
