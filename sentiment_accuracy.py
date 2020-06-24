@@ -5,6 +5,7 @@ import datetime
 import torch
 import torchtext.data as data
 import torchtext.datasets as datasets
+from main import imdb
 import model
 # import train
 import mydatasets
@@ -42,38 +43,13 @@ parser.add_argument('-predict', type=str, default=True, help='predict the senten
 parser.add_argument('-test', action='store_true', default=False, help='train or test')
 args = parser.parse_args()
 
-
-# load SST dataset
-def sst(text_field, label_field, **kargs):
-    train_data, dev_data, test_data = datasets.SST.splits(text_field, label_field, fine_grained=True)
-    text_field.build_vocab(train_data, dev_data, test_data)
-    label_field.build_vocab(train_data, dev_data, test_data)
-    train_iter, dev_iter, test_iter = data.BucketIterator.splits(
-        (train_data, dev_data, test_data),
-        batch_sizes=(args.batch_size,
-                     len(dev_data),
-                     len(test_data)),
-        **kargs)
-    return train_iter, dev_iter, test_iter
-
-
-# load MR dataset
-def mr(text_field, label_field, **kargs):
-    train_data, dev_data = mydatasets.MR.splits(text_field, label_field)
-    text_field.build_vocab(train_data, dev_data)
-    label_field.build_vocab(train_data, dev_data)
-    train_iter, dev_iter = data.Iterator.splits(
-        (train_data, dev_data),
-        batch_sizes=(args.batch_size, len(dev_data)),
-        **kargs)
-    return train_iter, dev_iter
-
-
 # load data
 print("\nLoading data...")
 text_field = data.Field(lower=True)
 label_field = data.Field(sequential=False)
-train_iter, dev_iter = mr(text_field, label_field, device=-1, repeat=False)
+
+train_iter, dev_iter, test_iter = imdb(text_field, label_field, device=-1, repeat=False)
+# train_iter, dev_iter = mr(text_field, label_field, device=-1, repeat=False)
 # train_iter, dev_iter, test_iter = sst(text_field, label_field, device=-1, repeat=False)
 
 
@@ -93,7 +69,7 @@ cnn = model.CNN_Text(args)
 snapshot = '/Users/xuchen/core/pycharm/project/cnn-text-classification-pytorch/snapshot/best_steps_11513.pt'
 if snapshot is not None:
     print('\nLoading model from {}...'.format(snapshot))
-    cnn.load_state_dict(torch.load(snapshot))
+    cnn.load_state_dict(torch.load(snapshot, map_location=torch.device('cpu')))
 
 if args.cuda:
     torch.cuda.set_device(args.device)
@@ -126,39 +102,51 @@ def sent_acc(samples, model, text_field, cuda_flag, positive=True, ):
     # return label_feild.vocab.itos[predicted.data[0][0]+1]
     return accuracy
 
-def calculate_acc(file_pos, file_neg, label):
-    # mean_acc, pos_acc, neg_acc = None, None, None
-    file_pos = '{}/{}'.format(file_pos, label)
-    with open(file_pos, 'r') as f:
-        samples = f.read().split('<|endoftext|>')
-        samples = [s for s in samples if len(s.split()) > 20]
 
-        # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
-        pos_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=True)
-        # print('{} = {}'.format(l, pos_acc))
+def calculate_acc(method_dirs, label):
+    for method_dir in method_dirs:
+        # mean_acc, pos_acc, neg_acc = None, None, None
+        file_pos = '{}/positive/{}'.format(method_dir, label)
+        with open(file_pos, 'r') as f:
+            samples = f.read().split('<|endoftext|>')
+            samples = [s for s in samples if len(s.split()) > 20]
 
-    file_neg = '{}/{}'.format(file_neg, label)
-    with open(file_neg, 'r') as f:
-        samples = f.read().split('<|endoftext|>')
-        samples = [s for s in samples if len(s.split()) > 20]
+            # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
+            pos_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=True)
+            # print('{} = {}'.format(l, pos_acc))
 
-        # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
-        neg_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=False)
-        # print('{} = {}'.format(l, neg_acc))
-    mean_acc = (pos_acc + neg_acc) / 2
-    return mean_acc, pos_acc, neg_acc
+        file_neg = '{}/negative/{}'.format(method_dir, label)
+        with open(file_neg, 'r') as f:
+            samples = f.read().split('<|endoftext|>')
+            samples = [s for s in samples if len(s.split()) > 20]
+
+            # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
+            neg_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=False)
+            # print('{} = {}'.format(l, neg_acc))
+        mean_acc = (pos_acc + neg_acc) / 2
+        print(method_dir)
+        print(mean_acc.item(), pos_acc, neg_acc)
 
 
 # train or predict
+
+pplm_generated_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/generated'
+pplm_reversed_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/reversed'
+vad_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad'
+vad_abs_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad_abs'
+
 label = ['B', 'BR', 'BC', 'BCR']
-file_pos = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad_abs/positive'
-file_neg = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad_abs/negative'
-# file_pos = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/reversed/positive'
-# file_neg = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/reversed/negative'
-mean_acc, pos_acc, neg_acc = calculate_acc(file_pos, file_neg, 'BC')
-print(pos_acc)
-print(neg_acc)
-print(mean_acc.item())
+method_dirs = [
+    pplm_generated_dir,
+    pplm_reversed_dir,
+    vad_dir,
+    vad_abs_dir
+]
+
+calculate_acc(method_dirs, label[2])
+# print('Positive: {}'.format(pos_acc))
+# print('Negative: {}'.format(neg_acc))
+# print('Mean: {}'.format(mean_acc.item()))
 
 # for l in label:
 #     pos_acc, neg_acc = None, None
@@ -179,5 +167,3 @@ print(mean_acc.item())
 #         # print('{} = {}'.format(l, neg_acc))
 #
 #     print('{} = {}'.format(l, (pos_acc + neg_acc) / 2))
-
-

@@ -12,7 +12,6 @@ import random
 import re
 
 SEED = 1234
-
 parser = argparse.ArgumentParser(description='CNN text classificer')
 # learning
 parser.add_argument('-lr', type=float, default=0.001, help='initial learning rate [default: 0.001]')
@@ -110,48 +109,50 @@ def mr(text_field, label_field, **kargs):
     return train_iter, dev_iter
 
 
-# load data
-print("\nLoading data...")
-text_field = data.Field(lower=True)
-label_field = data.Field(sequential=False)
-# train_iter, dev_iter = mr(text_field, label_field, device=-1, repeat=False)
-train_iter, dev_iter, test_iter = imdb(text_field, label_field, device=-1, repeat=False)
+if __name__ == '__main__':
 
-# update args and print
-args.embed_num = len(text_field.vocab)
-args.class_num = len(label_field.vocab) - 1
-args.cuda = (not args.no_cuda) and torch.cuda.is_available()
-del args.no_cuda
-args.kernel_sizes = [int(k) for k in args.kernel_sizes.split(',')]
-args.save_dir = os.path.join(args.save_dir, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+    # load data
+    print("\nLoading data...")
+    text_field = data.Field(lower=True)
+    label_field = data.Field(sequential=False)
+    # train_iter, dev_iter = mr(text_field, label_field, device=-1, repeat=False)
+    train_iter, dev_iter, test_iter = imdb(text_field, label_field, device=-1, repeat=False)
 
-print("\nParameters:")
-for attr, value in sorted(args.__dict__.items()):
-    print("\t{}={}".format(attr.upper(), value))
+    # update args and print
+    args.embed_num = len(text_field.vocab)
+    args.class_num = len(label_field.vocab) - 1
+    args.cuda = (not args.no_cuda) and torch.cuda.is_available()
+    del args.no_cuda
+    args.kernel_sizes = [int(k) for k in args.kernel_sizes.split(',')]
+    args.save_dir = os.path.join(args.save_dir, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
 
-# model
-cnn = model.CNN_Text(args)
-if args.snapshot is not None:
-    print('\nLoading model from {}...'.format(args.snapshot))
-    cnn.load_state_dict(torch.load(args.snapshot))
+    print("\nParameters:")
+    for attr, value in sorted(args.__dict__.items()):
+        print("\t{}={}".format(attr.upper(), value))
 
-if args.cuda:
-    torch.cuda.set_device(args.device)
-    cnn = cnn.cuda()
+    # model
+    cnn = model.CNN_Text(args)
+    if args.snapshot is not None:
+        print('\nLoading model from {}...'.format(args.snapshot))
+        cnn.load_state_dict(torch.load(args.snapshot))
 
-# train or predict
-if args.predict is not None:
-    label = train.predict(args.predict, cnn, text_field, label_field, args.cuda)
-    print('\n[Text]  {}\n[Label] {}\n'.format(args.predict, label))
-elif args.test:
-    try:
-        train.eval(test_iter, cnn, args)
-    except Exception as e:
-        print("\nSorry. The test dataset doesn't  exist.\n")
-else:
-    print()
-    try:
-        train.train(train_iter, dev_iter, cnn, args)
-    except KeyboardInterrupt:
-        print('\n' + '-' * 89)
-        print('Exiting from training early')
+    if args.cuda:
+        torch.cuda.set_device(args.device)
+        cnn = cnn.cuda()
+
+    # train or predict
+    if args.predict is not None:
+        label = train.predict(args.predict, cnn, text_field, label_field, args.cuda)
+        print('\n[Text]  {}\n[Label] {}\n'.format(args.predict, label))
+    elif args.test:
+        try:
+            train.eval(test_iter, cnn, args)
+        except Exception as e:
+            print("\nSorry. The test dataset doesn't  exist.\n")
+    else:
+        print()
+        try:
+            train.train(train_iter, dev_iter, cnn, args)
+        except KeyboardInterrupt:
+            print('\n' + '-' * 89)
+            print('Exiting from training early')
