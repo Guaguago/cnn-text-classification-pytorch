@@ -103,67 +103,44 @@ def sent_acc(samples, model, text_field, cuda_flag, positive=True, ):
     return accuracy
 
 
-def calculate_acc(method_dirs, label):
-    for method_dir in method_dirs:
-        # mean_acc, pos_acc, neg_acc = None, None, None
-        file_pos = '{}/positive/{}'.format(method_dir, label)
-        with open(file_pos, 'r') as f:
-            samples = f.read().split('<|endoftext|>')
-            samples = [s for s in samples if len(s.split()) > 20]
-
-            # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
-            pos_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=True)
-            # print('{} = {}'.format(l, pos_acc))
-
-        file_neg = '{}/negative/{}'.format(method_dir, label)
-        with open(file_neg, 'r') as f:
-            samples = f.read().split('<|endoftext|>')
-            samples = [s for s in samples if len(s.split()) > 20]
-
-            # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
-            neg_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=False)
-            # print('{} = {}'.format(l, neg_acc))
-        mean_acc = (pos_acc + neg_acc) / 2
-        print(method_dir)
-        print(mean_acc.item(), pos_acc, neg_acc)
+def cal_acc(sent_label, method_label, suffix, src):
+    src = '{}/{}/{}{}'.format(src, sent_label, method_label, suffix)
+    with open(src, 'r') as f:
+        samples = f.read().split('<|endoftext|>')
+        samples = samples[1:]
+        acc = sent_acc(samples, cnn, text_field, args.cuda,
+                       True if sent_label == 'positive' else False)
+        return acc
 
 
-# train or predict
+def cal_accs(method_label, suffix, src):
+    print('{}:\n'.format(method_label))
+    pos_acc = cal_acc('positive', method_label, suffix, src)
+    print('pos_acc: {}'.format(pos_acc.item()))
 
-pplm_generated_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/generated'
-pplm_reversed_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/pplm/reversed'
-vad_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad'
-vad_abs_dir = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/vad_abs'
+    neg_acc = cal_acc('negative', method_label, suffix, src)
+    print('neg_acc: {}'.format(neg_acc.item()))
 
-label = ['B', 'BR', 'BC', 'BCR']
-method_dirs = [
-    pplm_generated_dir,
-    pplm_reversed_dir,
-    vad_dir,
-    vad_abs_dir
+    print('mean_acc: {}'.format((pos_acc + neg_acc) / 2))
+
+
+SRC_SAMPLES = '/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/generated_samples'
+
+# # single or not
+# sent_label = [
+#     # 'positive',
+#     'negative'
+# ]
+
+# multiple
+method_label = [
+    'BC',
+    # 'BC_VAD',
+    # 'BC_VAD_ABS',
 ]
 
-calculate_acc(method_dirs, label[2])
-# print('Positive: {}'.format(pos_acc))
-# print('Negative: {}'.format(neg_acc))
-# print('Mean: {}'.format(mean_acc.item()))
+suffix = '(2_45_10)'
 
-# for l in label:
-#     pos_acc, neg_acc = None, None
-#     with open('/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/positive/{}'.format(l), 'r') as f:
-#         samples = f.read().split('<|endoftext|>')
-#         samples = [s for s in samples if len(s.split()) > 20]
-#
-#         # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
-#         pos_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=True)
-#         # print('{} = {}'.format(l, pos_acc))
-#
-#     with open('/Users/xuchen/core/pycharm/project/PPL/automated_evaluation/negative/{}'.format(l), 'r') as f:
-#         samples = f.read().split('<|endoftext|>')
-#         samples = [s for s in samples if len(s.split()) > 20]
-#
-#         # samples = ['I love you so much !', 'So cool good . happy birthday ! ']
-#         neg_acc = sent_acc(samples, cnn, text_field, args.cuda, positive=False)
-#         # print('{} = {}'.format(l, neg_acc))
-#
-#     print('{} = {}'.format(l, (pos_acc + neg_acc) / 2))
+cal_accs(method_label[0], suffix, SRC_SAMPLES)
+# neg_acc = cal_acc('negative', method_label[0], SRC_SAMPLES)
+# print('neg_acc: {}'.format(neg_acc.item()))
